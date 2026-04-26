@@ -118,8 +118,8 @@ if __name__ == '__main__':
                         help='Root dataset directory')
     parser.add_argument('--num_frames_sequence', type=int, default=9,
                         help='Sequence length (paper used 9)')
-    parser.add_argument('--max_frames', type=int, default=128,
-                        help='Maximum frames to extract per video (default: 128)')
+    parser.add_argument('--max_frames', type=int, default=99999,
+                        help='Maximum frames to extract per video (default: all frames)')
     parser.add_argument('--left_player', action='store_true',
                         help='Only extract frames where the left player is active')
     parser.add_argument('--dataset_types', nargs='+',

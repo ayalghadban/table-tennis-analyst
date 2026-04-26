@@ -121,6 +121,10 @@ def get_events_infor(game_list, configs, dataset_type):
                 if (ball_position_xy[0] < 0) or (ball_position_xy[1] < 0):
                     continue
 
+                # Skip sequences where any of the 9 image files is missing
+                if not all(os.path.isfile(p) for p in img_path_list):
+                    continue
+
                 # Get segmentation path for the last frame in the sequence
                 seg_path = os.path.join(annos_dir, game_name, 'segmentation_masks', '{}.png'.format(last_f_idx))
                 if not os.path.isfile(seg_path):
