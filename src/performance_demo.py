@@ -77,9 +77,9 @@ def run_model_on_video(video_path, model, configs,
     queue_frames = deque(maxlen=middle_idx + 1)
 
     w_original, h_original = 1920, 1080
-    w_resize,   h_resize   = configs.input_size          # (320, 128)
-    w_ratio = w_original / w_resize[0]
-    h_ratio = h_original / h_resize[1]
+    w_resize, h_resize = configs.input_size[0], configs.input_size[1]   # 320, 128
+    w_ratio = w_original / w_resize
+    h_ratio = h_original / h_resize
 
     frame_idx     = 0
     processed     = 0
@@ -112,8 +112,8 @@ def run_model_on_video(video_path, model, configs,
 
             # Final ball position in original resolution
             ball_final = [
-                int(prediction_global[0] * w_ratio + prediction_local[0] - w_resize[0] / 2),
-                int(prediction_global[1] * h_ratio + prediction_local[1] - h_resize[1] / 2),
+                int(prediction_global[0] * w_ratio + prediction_local[0] - w_resize / 2),
+                int(prediction_global[1] * h_ratio + prediction_local[1] - h_resize / 2),
             ]
 
             # ── skip frames without left-player presence ───────────────────────
@@ -172,13 +172,16 @@ def _print_shot_live(shot, frame_idx):
 # Assessment phase
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_assessment(assessment_video, model, configs, max_frames=120, show_image=False):
+def run_assessment(assessment_video, model, configs, max_frames=120,
+                   bounce_thresh=0.25, net_thresh=0.30, show_image=False):
     print("\n" + "═" * 48)
     print("  🎯 مرحلة تحديد المستوى (التقييم الأولي)")
     print("═" * 48)
 
     assessor = LevelAssessment(max_frames=max_frames)
     analyzer = assessor.get_analyzer()
+    analyzer.bounce_thresh = bounce_thresh
+    analyzer.net_thresh    = net_thresh
 
     run_model_on_video(assessment_video, model, configs,
                        analyzer, max_frames=max_frames, show_image=show_image)
@@ -194,7 +197,8 @@ def run_assessment(assessment_video, model, configs, max_frames=120, show_image=
 
 def run_stage_loop(stage_videos, model, configs,
                    starting_level, starting_stage,
-                   max_retries=3, show_image=False):
+                   max_retries=3, bounce_thresh=0.25, net_thresh=0.30,
+                   show_image=False):
     """
     Iterate through stages starting from `starting_stage`.
     `stage_videos` can be a list (one per stage) or a single video
@@ -232,7 +236,9 @@ def run_stage_loop(stage_videos, model, configs,
         print("═" * 48)
 
         # Create fresh analyzer with this stage's config
-        analyzer = PlayerAnalyzer(stage_config=stage_cfg)
+        analyzer = PlayerAnalyzer(stage_config=stage_cfg,
+                                  bounce_thresh=bounce_thresh,
+                                  net_thresh=net_thresh)
         video_path = _get_video(stage_id)
 
         processed = run_model_on_video(
@@ -319,8 +325,8 @@ def main():
     model.eval()
 
     configs.thresh_ball_pos_mask = 0.05
-    configs.seg_thresh           = perf_args.bounce_thresh
-    configs.event_thresh         = perf_args.net_thresh
+    configs.seg_thresh           = 0.5
+    configs.event_thresh         = 0.5
 
     # ── assessment ────────────────────────────────────────────────────────────
     starting_level = perf_args.starting_level
@@ -329,6 +335,8 @@ def main():
     if not perf_args.skip_assessment and perf_args.assessment_video:
         starting_level, starting_stage = run_assessment(
             perf_args.assessment_video, model, configs,
+            bounce_thresh=perf_args.bounce_thresh,
+            net_thresh=perf_args.net_thresh,
             show_image=perf_args.show_image,
         )
 
@@ -347,6 +355,8 @@ def main():
         starting_level = starting_level,
         starting_stage = starting_stage,
         max_retries    = perf_args.max_retries,
+        bounce_thresh  = perf_args.bounce_thresh,
+        net_thresh     = perf_args.net_thresh,
         show_image     = perf_args.show_image,
     )
 

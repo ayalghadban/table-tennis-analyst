@@ -38,8 +38,8 @@ class PlayerAnalyzer:
     """
 
     def __init__(self, stage_config: dict,
-                 bounce_thresh: float = 0.45,
-                 net_thresh: float    = 0.45):
+                 bounce_thresh: float = 0.25,
+                 net_thresh: float    = 0.30):
 
         self.stage_config   = stage_config
         self.bounce_thresh  = bounce_thresh
@@ -172,13 +172,11 @@ class PlayerAnalyzer:
                           speed: float, direction: str,
                           net_prob: float) -> str:
         """Map shot characteristics to a result label."""
-        # Miss: ball not detected (position at origin)
+        # Ball not detected (position at or near origin) → miss
         if x == 0 and y == 0:
             return "miss"
-
-        # Net hit
-        if net_prob >= self.net_thresh:
-            return "net"
+        if x < 5 and y < 5:
+            return "miss"
 
         cfg = self.stage_config
 
@@ -186,18 +184,22 @@ class PlayerAnalyzer:
         sp_min, sp_max = cfg.get("target_speed_range", (0, 9999))
         speed_ok = sp_min <= speed <= sp_max
 
+        # Net hit: only if speed > 0 (ball actually moving) AND net_prob is high
+        if net_prob >= self.net_thresh and speed > 0:
+            return "net"
+
         # Direction check
-        target_dir = cfg.get("target_direction", "any")
-        dir_ok = (target_dir == "any") or (direction == target_dir)
+        target_dir  = cfg.get("target_direction", "any")
+        dir_ok   = (target_dir == "any") or (direction == target_dir)
 
         # Zone check (left/right half of the table based on x in original res)
         target_zone = cfg.get("target_zone", "any")
         if target_zone == "any":
             zone_ok = True
         elif target_zone == "left":
-            zone_ok = x < 960      # left half of 1920-wide frame
+            zone_ok = x < 960
         else:
-            zone_ok = x >= 960     # right half
+            zone_ok = x >= 960
 
         if speed_ok and dir_ok and zone_ok:
             return "correct"
