@@ -176,8 +176,8 @@ class TTNet(nn.Module):
         self.w_resize = input_size[0]
         self.h_resize = input_size[1]
         self.thresh_ball_pos_mask = thresh_ball_pos_mask
-        self.mean = torch.repeat_interleave(torch.tensor(mean).view(1, 3, 1, 1), repeats=9, dim=1)
-        self.std = torch.repeat_interleave(torch.tensor(std).view(1, 3, 1, 1), repeats=9, dim=1)
+        self.mean = torch.repeat_interleave(torch.tensor(mean).view(1, 3, 1, 1), repeats=num_frames_sequence, dim=1)
+        self.std = torch.repeat_interleave(torch.tensor(std).view(1, 3, 1, 1), repeats=num_frames_sequence, dim=1)
 
     def forward(self, resize_batch_input, org_ball_pos_xy):
         """Forward propagation
