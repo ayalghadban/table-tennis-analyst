@@ -1,3 +1,4 @@
+import argparse
 import os
 from glob import glob
 
@@ -41,12 +42,25 @@ def extract_images_from_videos(video_path, out_images_dir):
 
 
 if __name__ == '__main__':
-    dataset_dir = '../dataset'
-    for dataset_type in ['training', 'test']:
-        video_dir = os.path.join(dataset_dir, dataset_type, 'videos')
-        out_images_dir = os.path.join(dataset_dir, dataset_type, 'images')
+    parser = argparse.ArgumentParser(
+        description='Extract every frame from each video (full video → img_000000.jpg …)'
+    )
+    parser.add_argument(
+        '--dataset_dir', type=str, default='../dataset',
+        help='Root dataset directory (contains training/, test/, …)',
+    )
+    parser.add_argument(
+        '--dataset_types', nargs='+', default=['training', 'test'],
+        help='Which splits to process (e.g. training test)',
+    )
+    args = parser.parse_args()
+
+    for dataset_type in args.dataset_types:
+        video_dir = os.path.join(args.dataset_dir, dataset_type, 'videos')
+        out_images_dir = os.path.join(args.dataset_dir, dataset_type, 'images')
 
         video_paths = glob(os.path.join(video_dir, '*.mp4'))
+        print(f'\n── {dataset_type} ── {len(video_paths)} video(s)')
 
-        for video_idx, video_path in enumerate(video_paths):
+        for video_path in video_paths:
             extract_images_from_videos(video_path, out_images_dir)
