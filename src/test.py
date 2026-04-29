@@ -109,6 +109,8 @@ def test(test_loader, model, configs):
             global_ball_pos_xy = global_ball_pos_xy.numpy()
             # Transfer output to cpu
             target_seg = target_seg.cpu().numpy()
+            if pred_ball_local is not None and hasattr(local_ball_pos_xy, 'cpu'):
+                local_ball_pos_xy = local_ball_pos_xy.cpu().numpy()
 
             for sample_idx in range(batch_size):
                 # Get target
@@ -136,7 +138,6 @@ def test(test_loader, model, configs):
                 # Process local ball stage
                 if pred_ball_local is not None:
                     # Get target
-                    local_ball_pos_xy = local_ball_pos_xy.cpu().numpy()  # Ground truth of the local stage
                     sample_local_ball_pos_xy = local_ball_pos_xy[sample_idx]  # Target
                     # Process the local stage
                     sample_pred_ball_local = pred_ball_local[sample_idx]
@@ -176,7 +177,7 @@ def test(test_loader, model, configs):
 
                 # Process segmentation stage
                 if pred_seg is not None:
-                    sample_target_seg = target_seg[sample_idx].transpose(1, 2, 0).astype(np.int)
+                    sample_target_seg = target_seg[sample_idx].transpose(1, 2, 0).astype(np.int32)
                     sample_prediction_seg = get_prediction_seg(pred_seg[sample_idx], configs.seg_thresh)
 
                     # Calculate the IoU
@@ -189,7 +190,7 @@ def test(test_loader, model, configs):
                     if configs.save_test_output:
                         fig, axes = plt.subplots(nrows=batch_size, ncols=2, figsize=(10, 5))
                         plt.tight_layout()
-                        axes.ravel()
+                        axes = np.array(axes).ravel()
                         axes[2 * sample_idx].imshow(sample_target_seg * 255)
                         axes[2 * sample_idx + 1].imshow(sample_prediction_seg * 255)
                         # title

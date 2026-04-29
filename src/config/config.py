@@ -176,7 +176,7 @@ def parse_configs():
     parser.add_argument('--save_demo_output', action='store_true',
                         help='If true, the image of demonstration phase will be saved')
 
-    configs = edict(vars(parser.parse_args()))
+    configs = edict(vars(parser.parse_known_args()[0]))
 
     ####################################################################
     ############## Hardware configurations ############################
