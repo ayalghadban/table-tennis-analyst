@@ -33,6 +33,13 @@ Run example
       --stage_videos /path/to/stage_video.mp4 \
       --starting_level intermediate \
       --skip_assessment
+
+Notes
+─────
+  - Default `--max_frames` per stage (~120–128) caps runtime; `--max_frames N` overrides that.
+  - Ball XY are scaled using the opened video resolution (was hard-coded 1920×1080 before).
+  - Use `--bounce_thresh 0.15` … `0.3` if you see posture OK but zero shots (model outputs weak).
+  - `--skip_left_player_filter`: process frames even when left-player segmentation is empty.
 """
 
 import os
@@ -61,11 +68,14 @@ from utils.level_assessment import LevelAssessment
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_model_on_video(video_path, model, configs,
-                       analyzer, max_frames=128, show_image=False):
+                       analyzer, max_frames=128, show_image=False,
+                       require_left_player=True):
     """
     Process up to `max_frames` frames from `video_path`.
-    Only frames where the left player is detected in the segmentation
-    contribute to posture tracking.
+
+    Frames may be skipped when `require_left_player` is True and the segmentation
+    model reports no left-half player mask (channel 0). Ball coordinates are scaled
+    from the model input size to the video's native width/height.
 
     Returns the number of frames actually processed.
     """
@@ -76,7 +86,12 @@ def run_model_on_video(video_path, model, configs,
     middle_idx  = configs.num_frames_sequence // 2
     queue_frames = deque(maxlen=middle_idx + 1)
 
-    w_original, h_original = 1920, 1080
+    w_original, h_original = video_loader.video_w, video_loader.video_h
+    if w_original <= 0 or h_original <= 0:
+        w_original, h_original = 1920, 1080
+
+    analyzer.scene_width = w_original
+
     w_resize, h_resize = configs.input_size[0], configs.input_size[1]   # 320, 128
     w_ratio = w_original / w_resize
     h_ratio = h_original / h_resize
@@ -116,12 +131,13 @@ def run_model_on_video(video_path, model, configs,
                 int(prediction_global[1] * h_ratio + prediction_local[1] - h_resize / 2),
             ]
 
-            # ── skip frames without left-player presence ───────────────────────
+            # ── optional: skip frames without left-player segmentation ────────
             seg = prediction_seg  # shape (128, 320, 3) binary
-            left_player_pixels = seg[:, : seg.shape[1] // 2, 0].sum()
-            if left_player_pixels == 0:
-                frame_idx += 1
-                continue   # no left player detected → skip frame
+            if require_left_player:
+                left_player_pixels = seg[:, : seg.shape[1] // 2, 0].sum()
+                if left_player_pixels == 0:
+                    frame_idx += 1
+                    continue
 
             # ── feed to analyzer ───────────────────────────────────────────────
             shot = analyzer.update(
@@ -173,7 +189,8 @@ def _print_shot_live(shot, frame_idx):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_assessment(assessment_video, model, configs, max_frames=120,
-                   bounce_thresh=0.25, net_thresh=0.30, show_image=False):
+                   bounce_thresh=0.25, net_thresh=0.30, show_image=False,
+                   require_left_player=True):
     print("\n" + "═" * 48)
     print("  🎯 مرحلة تحديد المستوى (التقييم الأولي)")
     print("═" * 48)
@@ -184,7 +201,8 @@ def run_assessment(assessment_video, model, configs, max_frames=120,
     analyzer.net_thresh    = net_thresh
 
     run_model_on_video(assessment_video, model, configs,
-                       analyzer, max_frames=max_frames, show_image=show_image)
+                       analyzer, max_frames=max_frames, show_image=show_image,
+                       require_left_player=require_left_player)
 
     level, start_stage, report = assessor.finalise(analyzer)
     print(report)
@@ -198,7 +216,8 @@ def run_assessment(assessment_video, model, configs, max_frames=120,
 def run_stage_loop(stage_videos, model, configs,
                    starting_level, starting_stage,
                    max_retries=3, bounce_thresh=0.25, net_thresh=0.30,
-                   show_image=False):
+                   show_image=False, max_frames_override=None,
+                   require_left_player=True):
     """
     Iterate through stages starting from `starting_stage`.
     `stage_videos` can be a list (one per stage) or a single video
@@ -241,11 +260,16 @@ def run_stage_loop(stage_videos, model, configs,
                                   net_thresh=net_thresh)
         video_path = _get_video(stage_id)
 
+        mf = stage_cfg["max_frames"]
+        if max_frames_override is not None:
+            mf = max_frames_override
+
         processed = run_model_on_video(
             video_path, model, configs,
             analyzer,
-            max_frames=stage_cfg["max_frames"],
+            max_frames=mf,
             show_image=show_image,
+            require_left_player=require_left_player,
         )
         print(f"\n  [✓] انتهت المرحلة – تم تحليل {processed} فريم")
 
@@ -294,8 +318,14 @@ def parse_perf_args():
                    help="GPU index (None = CPU)")
     p.add_argument("--show_image", action="store_true",
                    help="Show live video window during processing")
-    p.add_argument("--bounce_thresh", type=float, default=0.5)
-    p.add_argument("--net_thresh",    type=float, default=0.5)
+    p.add_argument("--bounce_thresh", type=float, default=0.25,
+                   help="Min bounce event score to count a shot (match training; 0.5 is often too strict)")
+    p.add_argument("--net_thresh", type=float, default=0.30,
+                   help="Min net-hit score to label a shot as net")
+    p.add_argument("--max_frames", type=int, default=None,
+                   help="Override frame cap for assessment and every stage (default: 120–128 per stage)")
+    p.add_argument("--skip_left_player_filter", action="store_true",
+                   help="Process every frame even if left-player segmentation is empty (debug / side view)")
     return p.parse_args()
 
 
@@ -332,12 +362,17 @@ def main():
     starting_level = perf_args.starting_level
     starting_stage = {"beginner": 1, "intermediate": 4, "advanced": 7}[starting_level]
 
+    require_left = not perf_args.skip_left_player_filter
+    assess_max = perf_args.max_frames if perf_args.max_frames is not None else 120
+
     if not perf_args.skip_assessment and perf_args.assessment_video:
         starting_level, starting_stage = run_assessment(
             perf_args.assessment_video, model, configs,
+            max_frames=assess_max,
             bounce_thresh=perf_args.bounce_thresh,
             net_thresh=perf_args.net_thresh,
             show_image=perf_args.show_image,
+            require_left_player=require_left,
         )
 
     print(f"\n  ▶  سيبدأ اللاعب من المرحلة {starting_stage} "
@@ -358,6 +393,8 @@ def main():
         bounce_thresh  = perf_args.bounce_thresh,
         net_thresh     = perf_args.net_thresh,
         show_image     = perf_args.show_image,
+        max_frames_override=perf_args.max_frames,
+        require_left_player=require_left,
     )
 
 

@@ -35,15 +35,19 @@ class PlayerAnalyzer:
         Minimum bounce_prob to register a shot event.
     net_thresh : float
         Minimum net_prob to classify a shot as a net-hit.
+    scene_width : int
+        Video width in pixels (for left/right zone checks). Default 1920.
     """
 
     def __init__(self, stage_config: dict,
                  bounce_thresh: float = 0.25,
-                 net_thresh: float    = 0.30):
+                 net_thresh: float    = 0.30,
+                 scene_width: int     = 1920):
 
         self.stage_config   = stage_config
         self.bounce_thresh  = bounce_thresh
         self.net_thresh     = net_thresh
+        self.scene_width    = scene_width
 
         # Ball tracking
         self._ball_history: List[tuple]  = []   # [(frame_idx, x, y)]
@@ -197,9 +201,11 @@ class PlayerAnalyzer:
         if target_zone == "any":
             zone_ok = True
         elif target_zone == "left":
-            zone_ok = x < 960
+            half = max(self.scene_width // 2, 1)
+            zone_ok = x < half
         else:
-            zone_ok = x >= 960
+            half = max(self.scene_width // 2, 1)
+            zone_ok = x >= half
 
         if speed_ok and dir_ok and zone_ok:
             return "correct"
