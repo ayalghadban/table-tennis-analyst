@@ -37,6 +37,8 @@ Run example
 Notes
 ─────
   - Default `--max_frames` per stage (~120–128) caps runtime; `--max_frames N` overrides that.
+  - **`--max_frames 0`** or **`--full_video`** = scan **the whole clip** (all sequences); only frames
+    with left-player segmentation count when that filter is on.
   - Ball XY are scaled using the opened video resolution (was hard-coded 1920×1080 before).
   - Use `--bounce_thresh 0.15` … `0.3` if you see posture OK but zero shots (model outputs weak).
   - `--skip_left_player_filter`: process frames even when left-player segmentation is empty.
@@ -63,21 +65,26 @@ from utils.stage_manager import StageManager, STAGES
 from utils.level_assessment import LevelAssessment
 
 
+def _no_frame_cap(max_frames):
+    """Run until EOF when True."""
+    return max_frames is None or max_frames <= 0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper: run TTNet on a video and feed results to analyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_model_on_video(video_path, model, configs,
                        analyzer, max_frames=128, show_image=False,
-                       require_left_player=True):
+                       require_left_player=True,
+                       progress_every=500):
     """
-    Process up to `max_frames` frames from `video_path`.
+    Walk the video **from the start**. Each loader step is one new frame in the TTNet sequence.
 
-    Frames may be skipped when `require_left_player` is True and the segmentation
-    model reports no left-half player mask (channel 0). Ball coordinates are scaled
-    from the model input size to the video's native width/height.
+    `max_frames` counts only frames **accepted** into the analyzer (after optional left-player
+    filter). Use `None` or `<= 0` for **no limit** → whole file.
 
-    Returns the number of frames actually processed.
+    Returns the number of analyzer frames processed.
     """
     video_loader = TTNet_Video_Loader(
         video_path, configs.input_size, configs.num_frames_sequence
@@ -102,7 +109,7 @@ def run_model_on_video(video_path, model, configs,
     with torch.no_grad():
         for count, resized_imgs in video_loader:
 
-            if processed >= max_frames:
+            if (not _no_frame_cap(max_frames)) and processed >= max_frames:
                 print(f"  [INFO] الحد الأقصى للفريمات ({max_frames}) تم الوصول إليه.")
                 break
 
@@ -171,6 +178,12 @@ def run_model_on_video(video_path, model, configs,
 
             frame_idx += 1
             processed += 1
+            if (_no_frame_cap(max_frames) and progress_every and processed > 0
+                    and processed % progress_every == 0):
+                print(f"  [INFO] تمت معالجة {processed:d} فريماً تحليلياً … (كل الفيديو)")
+
+        if _no_frame_cap(max_frames):
+            print("  [INFO] انتهى الفيديو – تم مسح كل التسلسلات المتاحة.")
 
     cv2.destroyAllWindows()
     return processed
@@ -219,9 +232,9 @@ def run_stage_loop(stage_videos, model, configs,
                    show_image=False, max_frames_override=None,
                    require_left_player=True):
     """
-    Iterate through stages starting from `starting_stage`.
-    `stage_videos` can be a list (one per stage) or a single video
-    that is replayed for each stage.
+    `max_frames_override`: None → each stage uses its default cap in STAGES.
+                           <= 0 → no cap (whole video per stage).
+                           > 0  → use this many accepted frames per stage.
     """
     mgr = StageManager(starting_level=starting_level)
     mgr.current_stage_id = starting_stage
@@ -262,7 +275,7 @@ def run_stage_loop(stage_videos, model, configs,
 
         mf = stage_cfg["max_frames"]
         if max_frames_override is not None:
-            mf = max_frames_override
+            mf = None if max_frames_override <= 0 else max_frames_override
 
         processed = run_model_on_video(
             video_path, model, configs,
@@ -323,7 +336,9 @@ def parse_perf_args():
     p.add_argument("--net_thresh", type=float, default=0.30,
                    help="Min net-hit score to label a shot as net")
     p.add_argument("--max_frames", type=int, default=None,
-                   help="Override frame cap for assessment and every stage (default: 120–128 per stage)")
+                   help="حد أقصى لإطارات التحليل (بعد فلتر اللاعب اليسار). 0 = كامل الفيديو بدون سقف.")
+    p.add_argument("--full_video", action="store_true",
+                   help="نفس تأثير --max_frames 0: مسح الملف من البداية إلى النهاية.")
     p.add_argument("--skip_left_player_filter", action="store_true",
                    help="Process every frame even if left-player segmentation is empty (debug / side view)")
     return p.parse_args()
@@ -363,7 +378,18 @@ def main():
     starting_stage = {"beginner": 1, "intermediate": 4, "advanced": 7}[starting_level]
 
     require_left = not perf_args.skip_left_player_filter
-    assess_max = perf_args.max_frames if perf_args.max_frames is not None else 120
+
+    if perf_args.full_video:
+        frame_cap = 0
+    else:
+        frame_cap = perf_args.max_frames
+
+    if frame_cap is None:
+        assess_max = 120
+    elif frame_cap <= 0:
+        assess_max = None
+    else:
+        assess_max = frame_cap
 
     if not perf_args.skip_assessment and perf_args.assessment_video:
         starting_level, starting_stage = run_assessment(
@@ -393,7 +419,7 @@ def main():
         bounce_thresh  = perf_args.bounce_thresh,
         net_thresh     = perf_args.net_thresh,
         show_image     = perf_args.show_image,
-        max_frames_override=perf_args.max_frames,
+        max_frames_override=frame_cap,
         require_left_player=require_left,
     )
 
